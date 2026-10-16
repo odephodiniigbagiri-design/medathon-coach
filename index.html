@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Medathon Recall Coach</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--text:#16202a;--muted:#5d6b78;--line:#dde2e8;--accent:#0f766e;--accent-t:#fff;--good:#15803d;--fair:#b45309;--poor:#b91c1c;--chip:#eef2f5;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1418;--card:#18202a;--text:#e8edf2;--muted:#9aa8b5;--line:#2b3744;--accent:#2dd4bf;--accent-t:#06231f;--good:#4ade80;--fair:#fbbf24;--poor:#f87171;--chip:#222d39}}
+:root[data-theme="dark"]{--bg:#0f1418;--card:#18202a;--text:#e8edf2;--muted:#9aa8b5;--line:#2b3744;--accent:#2dd4bf;--accent-t:#06231f;--good:#4ade80;--fair:#fbbf24;--poor:#f87171;--chip:#222d39}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#mr-root{max-width:640px;margin:0 auto;padding:16px}
+.mr-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
+.mr-h{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 10px;font-weight:600}
+h1.mr-title{font-size:20px;margin:4px 0 2px}
+.mr-sub{color:var(--muted);font-size:14px;margin:0 0 14px}
+label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+input,select,textarea{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);font:inherit}
+textarea{resize:vertical;min-height:110px}
+.mr-row{display:flex;gap:10px}.mr-row>div{flex:1}
+.mr-mic{display:flex;flex-direction:column;align-items:center;gap:8px;margin:6px 0 12px}
+.mr-micbtn{width:84px;height:84px;border-radius:50%;border:none;background:var(--accent);color:var(--accent-t);font-size:32px;cursor:pointer;position:relative}
+.mr-micbtn.rec{background:var(--poor);color:#fff;animation:pulse 1.3s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(185,28,28,.45)}100%{box-shadow:0 0 0 20px rgba(185,28,28,0)}}
+.mr-status{font-size:14px;color:var(--muted);min-height:20px;text-align:center}
+.mr-btn{width:100%;padding:12px;border:none;border-radius:10px;background:var(--accent);color:var(--accent-t);font:inherit;font-weight:600;cursor:pointer;margin-top:10px}
+.mr-btn:disabled{opacity:.45;cursor:not-allowed}
+.mr-btn.ghost{background:var(--chip);color:var(--text)}
+.mr-badge{display:inline-block;padding:6px 16px;border-radius:999px;font-weight:700;font-size:20px;color:#fff}
+.mr-badge.Good{background:var(--good)}.mr-badge.Fair{background:var(--fair)}.mr-badge.Poor{background:var(--poor)}
+.mr-badge.sm{font-size:12px;padding:2px 10px}
+.mr-top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.mr-score{font-size:28px;font-weight:700}
+.mr-note{font-size:13px;color:var(--muted)}
+.mr-bar{margin:8px 0}.mr-bar span{font-size:13px;color:var(--muted);display:flex;justify-content:space-between}
+.mr-track{height:8px;background:var(--chip);border-radius:6px;overflow:hidden}.mr-fill{height:100%;background:var(--accent);border-radius:6px}
+.mr-sec{margin-top:14px}.mr-sec h3{font-size:14px;margin:0 0 4px}
+.mr-sec ul{margin:0;padding-left:20px}.mr-sec li{margin:3px 0}
+.mr-p{margin:0;white-space:pre-wrap}
+.mr-err{color:var(--poor);font-size:14px;margin-top:8px}
+.mr-hist{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
+.mr-hist:first-of-type{border-top:none}
+.mr-hist small{color:var(--muted)}
+details summary{cursor:pointer;color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<div id="mr-root"></div>
+<script>
+/* Medathon Recall Coach — embeddable module.
+   Integration: MedathonRecall.mount(el, {topic, minutes, difficulty, notes, onResult})
+   Swap the brain:  MedathonRecall.setEvaluator(async payload => result)
+   Every result also fires a document event: "medathon:recall-result". */
+(function () {
+  var CFG = { lang: "en-NG", key: "medathon.recall.history.v1" };
+  var evaluator = null;
+
+  function h(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function loadHist() { try { return JSON.parse(localStorage.getItem(CFG.key) || "[]"); } catch (e) { return []; } }
+  function saveHist(a) { try { localStorage.setItem(CFG.key, JSON.stringify(a.slice(0, 30))); } catch (e) {} }
+
+  /* Rating bars move with study time and difficulty */
+  function cutoffs(min, diff) {
+    var g = 75, f = 50;
+    if (min < 20) { g -= 8; f -= 8; } else if (min >= 90) { g += 5; f += 5; }
+    if (diff === "hard") { g -= 6; f -= 6; } else if (diff === "easy") { g += 6; f += 6; }
+    return { good: g, fair: f };
+  }
+  function rate(score, c) { return score >= c.good ? "Good" : score >= c.fair ? "Fair" : "Poor"; }
+
+  /* Default brain: asks Claude through the artifact runtime. Replace with your backend in production. */
+  async function defaultEvaluator(p) {
+    var sample = (typeof claude !== "undefined" && claude.use) ? await claude.use("sample") : null;
+    if (!sample) throw new Error("The evaluator is not available in this view.");
+    var prompt = [
+      "You are an examiner and study coach for medical students aiming for distinctions.",
+      "A student studied \"" + p.topic + "\" for " + p.minutes + " minutes (difficulty: " + p.difficulty + ") and then recalled it aloud from memory.",
+      "The transcript comes from speech recognition, so do not penalise obvious mis-transcriptions of medical terms.",
+      p.notes ? "Grade against these reference notes first, then your own medical knowledge:\n" + p.notes : "Grade against the high-yield content a strong medical student should know on this topic.",
+      "Expected standard: a Good recall needs a score of about " + p.cutoffs.good + "+, Fair about " + p.cutoffs.fair + "+. Wrong facts must cost more than missing facts.",
+      "TRANSCRIPT:\n" + p.transcript,
+      "Return ONLY JSON with this shape:",
+      "{\"score\":0-100,\"coverage\":0-100,\"accuracy\":0-100,\"depth\":0-100,\"structure\":0-100,",
+      "\"got_right\":[short strings],\"missed\":[short high-yield points missed],",
+      "\"corrections\":[{\"said\":\"...\",\"correct\":\"...\"}],",
+      "\"explanation\":\"under 120 words teaching the most important missed content\",",
+      "\"clinical_hook\":\"one short clinical scenario linking the topic to practice\",",
+      "\"tip\":\"one specific technique to study this better, tied to what went wrong\",",
+      "\"follow_up_question\":\"one exam-style question\",\"review_in_days\":integer}"
+    ].join("\n");
+    return await sample.json(prompt);
+  }
+
+  function num(v) { v = Number(v); return isFinite(v) ? Math.max(0, Math.min(100, Math.round(v))) : 0; }
+  function arr(v) { return Array.isArray(v) ? v.map(function (x) { return typeof x === "string" ? x : JSON.stringify(x); }) : []; }
+
+  function mount(el, opts) {
+    opts = opts || {};
+    el.textContent = "";
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    var rec = null, recording = false, finalText = "", secs = 0, timer = null;
+
+    var head = h("div", "mr-card");
+    head.appendChild(h("h1", "mr-title", "Recall Coach"));
+    head.appendChild(h("p", "mr-sub", "Say what you remember. Get rated, then get the gaps filled."));
+
+    var topic = h("input"); topic.placeholder = "e.g. Brachial plexus"; topic.value = opts.topic || "";
+    var mins = h("input"); mins.type = "number"; mins.min = 5; mins.max = 480; mins.value = opts.minutes || 45;
+    var diff = h("select");
+    [["easy", "Easy"], ["moderate", "Moderate"], ["hard", "Hard"]].forEach(function (o) { var op = h("option", null, o[1]); op.value = o[0]; diff.appendChild(op); });
+    diff.value = opts.difficulty || "moderate";
+    var notes = h("textarea"); notes.placeholder = "Optional: paste your lecture notes so I grade against your course"; notes.style.minHeight = "70px"; notes.value = opts.notes || "";
+
+    function field(lbl, node) { var d = h("div"); d.appendChild(h("label", null, lbl)); d.appendChild(node); return d; }
+    head.appendChild(field("Topic you studied", topic));
+    var row = h("div", "mr-row"); row.appendChild(field("Minutes studied", mins)); row.appendChild(field("Difficulty", diff));
+    head.appendChild(row);
+    var det = h("details"); det.style.marginTop = "10px"; det.appendChild(h("summary", null, "Add reference notes")); det.appendChild(notes);
+    head.appendChild(det);
+
+    var rc = h("div", "mr-card");
+    rc.appendChild(h("p", "mr-h", "Your recall"));
+    var mic = h("div", "mr-mic");
+    var micBtn = h("button", "mr-micbtn", "🎙"); micBtn.setAttribute("aria-label", "Start or stop recording");
+    var status = h("div", "mr-status", SR ? "Tap the mic and start explaining." : "Voice input is not supported in this browser. Type your recall below.");
+    mic.appendChild(micBtn); mic.appendChild(status);
+    var box = h("textarea"); box.placeholder = "Your spoken recall appears here. You can edit it before submitting.";
+    var go = h("button", "mr-btn", "Rate my recall"); go.disabled = true;
+    var err = h("div", "mr-err");
+    rc.appendChild(mic); rc.appendChild(box); rc.appendChild(go); rc.appendChild(err);
+
+    var out = h("div");
+    var histCard = h("div", "mr-card");
+    el.appendChild(head); el.appendChild(rc); el.appendChild(out); el.appendChild(histCard);
+
+    function words() { return box.value.trim().split(/\s+/).filter(Boolean).length; }
+    function refresh() { go.disabled = words() < 8 || !topic.value.trim(); }
+    box.addEventListener("input", function () { finalText = box.value; refresh(); });
+    topic.addEventListener("input", refresh);
+
+    function tick() { secs++; status.textContent = "Listening… " + Math.floor(secs / 60) + ":" + String(secs % 60).padStart(2, "0"); }
+    function stop() {
+      recording = false; micBtn.classList.remove("rec"); clearInterval(timer);
+      if (rec) { try { rec.stop(); } catch (e) {} }
+      status.textContent = words() ? "Stopped. Edit if needed, then submit." : "Tap the mic and start explaining.";
+      refresh();
+    }
+    function start() {
+      if (!SR) return;
+      rec = new SR(); rec.lang = CFG.lang; rec.continuous = true; rec.interimResults = true;
+      finalText = box.value ? box.value + " " : ""; secs = 0;
+      rec.onresult = function (ev) {
+        var interim = "";
+        for (var i = ev.resultIndex; i < ev.results.length; i++) {
+          var t = ev.results[i][0].transcript;
+          if (ev.results[i].isFinal) finalText += t + " "; else interim += t;
+        }
+        box.value = (finalText + interim).trim(); refresh();
+      };
+      rec.onerror = function (e) {
+        if (e.error === "not-allowed" || e.error === "service-not-allowed") { stop(); status.textContent = "Microphone blocked. Allow mic access, or type your recall."; }
+      };
+      rec.onend = function () { if (recording) { try { rec.start(); } catch (e) {} } };
+      try { rec.start(); recording = true; micBtn.classList.add("rec"); timer = setInterval(tick, 1000); tick(); } catch (e) { status.textContent = "Could not start the mic."; }
+    }
+    micBtn.addEventListener("click", function () { recording ? stop() : start(); });
+
+    go.addEventListener("click", async function () {
+      if (recording) stop();
+      err.textContent = ""; out.textContent = "";
+      var m = Math.max(5, parseInt(mins.value, 10) || 30);
+      var payload = { topic: topic.value.trim(), minutes: m, difficulty: diff.value, notes: notes.value.trim(), transcript: box.value.trim(), cutoffs: cutoffs(m, diff.value), speakingSeconds: secs };
+      go.disabled = true; go.textContent = "Marking your recall…";
+      try {
+        var r = await (evaluator || defaultEvaluator)(payload);
+        var res = {
+          score: num(r.score), coverage: num(r.coverage), accuracy: num(r.accuracy), depth: num(r.depth), structure: num(r.structure),
+          got_right: arr(r.got_right), missed: arr(r.missed), explanation: String(r.explanation || ""), clinical_hook: String(r.clinical_hook || ""),
+          tip: String(r.tip || ""), follow_up_question: String(r.follow_up_question || ""), review_in_days: parseInt(r.review_in_days, 10) || 3,
+          corrections: Array.isArray(r.corrections) ? r.corrections.map(function (c) { return { said: String(c && c.said || ""), correct: String(c && c.correct || "") }; }) : []
+        };
+        res.rating = rate(res.score, payload.cutoffs);
+        render(res, payload);
+        var hist = loadHist(); hist.unshift({ topic: payload.topic, minutes: m, difficulty: payload.difficulty, score: res.score, rating: res.rating, at: Date.now() }); saveHist(hist);
+        renderHist();
+        var detail = { input: payload, result: res };
+        document.dispatchEvent(new CustomEvent("medathon:recall-result", { detail: detail }));
+        if (typeof opts.onResult === "function") opts.onResult(detail);
+      } catch (e) {
+        err.textContent = (e && e.message) ? e.message : "Something went wrong. Try again.";
+      }
+      go.textContent = "Rate my recall"; refresh();
+    });
+
+    function list(title, items) {
+      if (!items.length) return null;
+      var s = h("div", "mr-sec"); s.appendChild(h("h3", null, title));
+      var ul = h("ul"); items.forEach(function (t) { ul.appendChild(h("li", null, t)); }); s.appendChild(ul); return s;
+    }
+    function para(title, text) {
+      if (!text) return null;
+      var s = h("div", "mr-sec"); s.appendChild(h("h3", null, title)); s.appendChild(h("p", "mr-p", text)); return s;
+    }
+    function render(res, p) {
+      out.textContent = "";
+      var c = h("div", "mr-card");
+      var top = h("div", "mr-top");
+      top.appendChild(h("span", "mr-badge " + res.rating, res.rating));
+      top.appendChild(h("span", "mr-score", res.score + "/100"));
+      top.appendChild(h("span", "mr-note", "Bar for this session: Good " + p.cutoffs.good + "+, Fair " + p.cutoffs.fair + "+ (" + p.minutes + " min, " + p.difficulty + ")"));
+      c.appendChild(top);
+      var bars = h("div", "mr-sec");
+      [["Coverage", res.coverage], ["Accuracy", res.accuracy], ["Depth", res.depth], ["Structure", res.structure]].forEach(function (b) {
+        var w = h("div", "mr-bar"), l = h("span"); l.appendChild(h("b", null, b[0])); l.appendChild(h("b", null, String(b[1])));
+        var tr = h("div", "mr-track"), f = h("div", "mr-fill"); f.style.width = b[1] + "%"; tr.appendChild(f); w.appendChild(l); w.appendChild(tr); bars.appendChild(w);
+      });
+      c.appendChild(bars);
+      [list("What you got right", res.got_right), list("What you missed", res.missed)].forEach(function (n) { if (n) c.appendChild(n); });
+      if (res.corrections.length) {
+        var s = h("div", "mr-sec"); s.appendChild(h("h3", null, "Corrections")); var ul = h("ul");
+        res.corrections.forEach(function (x) { ul.appendChild(h("li", null, "You said: " + x.said + " → Correct: " + x.correct)); });
+        s.appendChild(ul); c.appendChild(s);
+      }
+      [para("Filling the gaps", res.explanation), para("Clinical hook", res.clinical_hook), para("How to study this better", res.tip), para("Test yourself", res.follow_up_question),
+       para("Next review", "Recall this topic again in " + res.review_in_days + " day" + (res.review_in_days === 1 ? "" : "s") + ".")].forEach(function (n) { if (n) c.appendChild(n); });
+      var again = h("button", "mr-btn ghost", "Recall again"); again.addEventListener("click", function () { box.value = ""; finalText = ""; out.textContent = ""; refresh(); window.scrollTo(0, 0); });
+      c.appendChild(again);
+      out.appendChild(c); c.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    function renderHist() {
+      histCard.textContent = ""; histCard.appendChild(h("p", "mr-h", "Recent sessions"));
+      var hs = loadHist().slice(0, 6);
+      if (!hs.length) { histCard.appendChild(h("div", "mr-note", "No sessions yet.")); return; }
+      hs.forEach(function (x) {
+        var r = h("div", "mr-hist"), l = h("div"); l.appendChild(h("div", null, x.topic)); l.appendChild(h("small", null, new Date(x.at).toLocaleDateString() + " · " + x.minutes + " min · " + x.difficulty));
+        var rt = h("div"); rt.appendChild(h("span", "mr-badge sm " + x.rating, x.rating + " " + x.score)); r.appendChild(l); r.appendChild(rt); histCard.appendChild(r);
+      });
+    }
+    renderHist(); refresh();
+  }
+
+  window.MedathonRecall = { mount: mount, setEvaluator: function (fn) { evaluator = fn; }, cutoffs: cutoffs };
+  mount(document.getElementById("mr-root"));
+})();
+</script>
+</body>
+</html>
